@@ -1,7 +1,7 @@
 {
-  "name": "openai-nim-proxy",
+  "name": "janitorai-deepseek-r1-proxy",
   "version": "1.0.0",
-  "description": "OpenAI compatible proxy for NVIDIA NIM API",
+  "description": "JanitorAI proxy for DeepSeek R1 via NVIDIA NIM",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
