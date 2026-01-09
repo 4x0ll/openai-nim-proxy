@@ -1,4 +1,4 @@
-// server.js - OpenAI to NVIDIA NIM API Proxy
+// server.js - JanitorAI NVIDIA NIM Proxy for DeepSeek R1
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -12,43 +12,42 @@ app.use(express.json());
 
 // NVIDIA NIM API configuration
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
-const NIM_API_KEY = process.env.NIM_API_KEY;
+const NIM_API_KEY = process.env.NVIDIA_API_KEY; // Changed to match Render env var
 
-// 🔥 REASONING DISPLAY TOGGLE - Shows/hides reasoning in output
-const SHOW_REASONING = false; // Set to true to show reasoning with <think> tags
+// 🔥 DeepSeek R1 Configuration
+const DEEPSEEK_R1_MODEL = 'deepseek/deepseek-r1:latest'; // Verified model name
+const SHOW_REASONING = true; // Set to true to see DeepSeek's thought process
+const ENABLE_THINKING_MODE = true; // Enable DeepSeek's reasoning capabilities
 
-// 🔥 THINKING MODE TOGGLE - Enables thinking for specific models that support it
-const ENABLE_THINKING_MODE = false; // Set to true to enable chat_template_kwargs thinking parameter
-
-// Model mapping (adjust based on available NIM models)
-const MODEL_MAPPING = {
-  'gpt-3.5-turbo': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-  'gpt-4': 'qwen/qwen3-coder-480b-a35b-instruct',
-  'gpt-4-turbo': 'moonshotai/kimi-k2-instruct-0905',
-  'gpt-4o': 'deepseek-ai/deepseek-v3.1',
-  'claude-3-opus': 'openai/gpt-oss-120b',
-  'claude-3-sonnet': 'openai/gpt-oss-20b',
-  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking' 
-};
+// 🔥 JanitorAI Roleplay Optimizations
+const DEFAULT_TEMPERATURE = 0.85; // Higher for creative roleplay
+const DEFAULT_MAX_TOKENS = 1500; // Longer responses for roleplay
+const DEFAULT_TOP_P = 0.95; // Better for creative writing
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/', (req, res) => {
   res.json({ 
-    status: 'ok', 
-    service: 'OpenAI to NVIDIA NIM Proxy', 
+    status: 'online', 
+    service: 'JanitorAI DeepSeek R1 Proxy',
+    model: DEEPSEEK_R1_MODEL,
     reasoning_display: SHOW_REASONING,
     thinking_mode: ENABLE_THINKING_MODE
   });
 });
 
-// List models endpoint (OpenAI compatible)
+// List models endpoint (OpenAI compatible for JanitorAI)
 app.get('/v1/models', (req, res) => {
-  const models = Object.keys(MODEL_MAPPING).map(model => ({
-    id: model,
+  const models = [{
+    id: 'deepseek-r1',
     object: 'model',
     created: Date.now(),
-    owned_by: 'nvidia-nim-proxy'
-  }));
+    owned_by: 'nvidia-nim'
+  }, {
+    id: 'gpt-4',
+    object: 'model',
+    created: Date.now(),
+    owned_by: 'nvidia-nim'
+  }];
   
   res.json({
     object: 'list',
@@ -56,50 +55,63 @@ app.get('/v1/models', (req, res) => {
   });
 });
 
-// Chat completions endpoint (main proxy)
+// Chat completions endpoint - MAIN JANITORAI ENDPOINT
 app.post('/v1/chat/completions', async (req, res) => {
   try {
-    const { model, messages, temperature, max_tokens, stream } = req.body;
+    const { 
+      model = 'deepseek-r1', 
+      messages, 
+      temperature = DEFAULT_TEMPERATURE, 
+      max_tokens = DEFAULT_MAX_TOKENS,
+      top_p = DEFAULT_TOP_P,
+      stream = false 
+    } = req.body;
     
-    // Smart model selection with fallback
-    let nimModel = MODEL_MAPPING[model];
-    if (!nimModel) {
-      try {
-        await axios.post(`${NIM_API_BASE}/chat/completions`, {
-          model: model,
-          messages: [{ role: 'user', content: 'test' }],
-          max_tokens: 1
-        }, {
-          headers: { 'Authorization': `Bearer ${NIM_API_KEY}`, 'Content-Type': 'application/json' },
-          validateStatus: (status) => status < 500
-        }).then(res => {
-          if (res.status >= 200 && res.status < 300) {
-            nimModel = model;
-          }
-        });
-      } catch (e) {}
+    console.log('Received JanitorAI request:', {
+      messageCount: messages?.length,
+      lastMessage: messages?.[messages.length - 1]?.content?.substring(0, 100) + '...'
+    });
+    
+    // Always use DeepSeek R1 for JanitorAI
+    const nimModel = DEEPSEEK_R1_MODEL;
+    
+    // 🔥 OPTIMIZED FOR ROLEPLAY: Enhance system prompt for better character responses
+    let enhancedMessages = [...messages];
+    
+    // Add roleplay optimization if it's a user message
+    const lastMessage = enhancedMessages[enhancedMessages.length - 1];
+    if (lastMessage && lastMessage.role === 'user' && enhancedMessages.length > 1) {
+      // Find the system message or add our optimization
+      const systemMessageIndex = enhancedMessages.findIndex(m => m.role === 'system');
       
-      if (!nimModel) {
-        const modelLower = model.toLowerCase();
-        if (modelLower.includes('gpt-4') || modelLower.includes('claude-opus') || modelLower.includes('405b')) {
-          nimModel = 'meta/llama-3.1-405b-instruct';
-        } else if (modelLower.includes('claude') || modelLower.includes('gemini') || modelLower.includes('70b')) {
-          nimModel = 'meta/llama-3.1-70b-instruct';
-        } else {
-          nimModel = 'meta/llama-3.1-8b-instruct';
-        }
+      if (systemMessageIndex === -1) {
+        // Add optimized system prompt for roleplay
+        enhancedMessages.unshift({
+          role: 'system',
+          content: `You are an expert roleplay AI assistant. Respond in character, providing detailed, engaging, and immersive responses. 
+          Stay in character at all times. Use descriptive language and show emotions through actions and dialogue.
+          IMPORTANT: For reasoning, use the <think> tags provided by DeepSeek R1. Your final response should be natural and in-character.`
+        });
       }
     }
     
-    // Transform OpenAI request to NIM format
+    // Transform to NIM format with DeepSeek R1 optimizations
     const nimRequest = {
       model: nimModel,
-      messages: messages,
-      temperature: temperature || 0.6,
-      max_tokens: max_tokens || 9024,
-      extra_body: ENABLE_THINKING_MODE ? { chat_template_kwargs: { thinking: true } } : undefined,
-      stream: stream || false
+      messages: enhancedMessages,
+      temperature: Math.min(Math.max(temperature, 0.1), 2.0), // Clamp to safe range
+      max_tokens: Math.min(Math.max(max_tokens, 100), 4000), // Clamp to safe range
+      top_p: top_p,
+      extra_body: ENABLE_THINKING_MODE ? { 
+        chat_template_kwargs: { 
+          thinking: true,
+          reasoning_stop_string: '</think>' // Explicit stop for reasoning
+        } 
+      } : undefined,
+      stream: stream
     };
+    
+    console.log('Forwarding to NVIDIA NIM with model:', nimModel);
     
     // Make request to NVIDIA NIM API
     const response = await axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
@@ -111,114 +123,124 @@ app.post('/v1/chat/completions', async (req, res) => {
     });
     
     if (stream) {
-      // Handle streaming response with reasoning
+      // Handle streaming response
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       
       let buffer = '';
-      let reasoningStarted = false;
       
       response.data.on('data', (chunk) => {
         buffer += chunk.toString();
-        const lines = buffer.split('\\n');
+        const lines = buffer.split('\n');
         buffer = lines.pop() || '';
         
         lines.forEach(line => {
           if (line.startsWith('data: ')) {
-            if (line.includes('[DONE]')) {
-              res.write(line + '\\n');
+            const dataStr = line.slice(6);
+            
+            if (dataStr.trim() === '[DONE]') {
+              res.write('data: [DONE]\n\n');
               return;
             }
             
             try {
-              const data = JSON.parse(line.slice(6));
+              const data = JSON.parse(dataStr);
+              
+              // Transform to OpenAI format
               if (data.choices?.[0]?.delta) {
+                const openaiDelta = {
+                  id: `chatcmpl-${Date.now()}`,
+                  object: 'chat.completion.chunk',
+                  created: Math.floor(Date.now() / 1000),
+                  model: model,
+                  choices: [{
+                    index: 0,
+                    delta: {},
+                    finish_reason: null
+                  }]
+                };
+                
+                // Handle reasoning content for DeepSeek R1
                 const reasoning = data.choices[0].delta.reasoning_content;
                 const content = data.choices[0].delta.content;
                 
-                if (SHOW_REASONING) {
-                  let combinedContent = '';
-                  
-                  if (reasoning && !reasoningStarted) {
-                    combinedContent = '<think>\\n' + reasoning;
-                    reasoningStarted = true;
-                  } else if (reasoning) {
-                    combinedContent = reasoning;
-                  }
-                  
-                  if (content && reasoningStarted) {
-                    combinedContent += '</think>\\n\\n' + content;
-                    reasoningStarted = false;
-                  } else if (content) {
-                    combinedContent += content;
-                  }
-                  
-                  if (combinedContent) {
-                    data.choices[0].delta.content = combinedContent;
-                    delete data.choices[0].delta.reasoning_content;
-                  }
-                } else {
-                  if (content) {
-                    data.choices[0].delta.content = content;
-                  } else {
-                    data.choices[0].delta.content = '';
-                  }
-                  delete data.choices[0].delta.reasoning_content;
+                if (SHOW_REASONING && reasoning) {
+                  // Show reasoning in <think> tags
+                  openaiDelta.choices[0].delta.content = `<think>${reasoning}</think>\n\n${content || ''}`;
+                } else if (content) {
+                  // Just show content (hide reasoning)
+                  openaiDelta.choices[0].delta.content = content;
                 }
+                
+                // Send in OpenAI format
+                res.write(`data: ${JSON.stringify(openaiDelta)}\n\n`);
               }
-              res.write(`data: ${JSON.stringify(data)}\\n\\n`);
             } catch (e) {
-              res.write(line + '\\n');
+              // Forward as-is if parsing fails
+              res.write(line + '\n');
             }
           }
         });
       });
       
-      response.data.on('end', () => res.end());
+      response.data.on('end', () => {
+        res.write('data: [DONE]\n\n');
+        res.end();
+      });
+      
       response.data.on('error', (err) => {
         console.error('Stream error:', err);
         res.end();
       });
+      
     } else {
-      // Transform NIM response to OpenAI format with reasoning
+      // Non-streaming response
+      const nimResponse = response.data;
+      
+      // Transform to OpenAI format
+      let fullContent = nimResponse.choices?.[0]?.message?.content || '';
+      const reasoningContent = nimResponse.choices?.[0]?.message?.reasoning_content || '';
+      
+      // Combine reasoning and content based on SHOW_REASONING setting
+      if (SHOW_REASONING && reasoningContent) {
+        fullContent = `<think>\n${reasoningContent}\n</think>\n\n${fullContent}`;
+      }
+      
       const openaiResponse = {
         id: `chatcmpl-${Date.now()}`,
         object: 'chat.completion',
         created: Math.floor(Date.now() / 1000),
         model: model,
-        choices: response.data.choices.map(choice => {
-          let fullContent = choice.message?.content || '';
-          
-          if (SHOW_REASONING && choice.message?.reasoning_content) {
-            fullContent = '<think>\\n' + choice.message.reasoning_content + '\\n</think>\\n\\n' + fullContent;
-          }
-          
-          return {
-            index: choice.index,
-            message: {
-              role: choice.message.role,
-              content: fullContent
-            },
-            finish_reason: choice.finish_reason
-          };
-        }),
-        usage: response.data.usage || {
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: fullContent
+          },
+          finish_reason: nimResponse.choices?.[0]?.finish_reason || 'stop'
+        }],
+        usage: nimResponse.usage || {
           prompt_tokens: 0,
           completion_tokens: 0,
           total_tokens: 0
         }
       };
       
+      console.log('Response sent to JanitorAI, token count:', openaiResponse.usage.total_tokens);
       res.json(openaiResponse);
     }
     
   } catch (error) {
-    console.error('Proxy error:', error.message);
+    console.error('Proxy error:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status
+    });
     
     res.status(error.response?.status || 500).json({
       error: {
-        message: error.message || 'Internal server error',
+        message: error.response?.data?.error?.message || 'Internal server error',
         type: 'invalid_request_error',
         code: error.response?.status || 500
       }
@@ -226,20 +248,63 @@ app.post('/v1/chat/completions', async (req, res) => {
   }
 });
 
-// Catch-all for unsupported endpoints
-app.all('*', (req, res) => {
-  res.status(404).json({
-    error: {
-      message: `Endpoint ${req.path} not found`,
-      type: 'invalid_request_error',
-      code: 404
-    }
-  });
+// Test endpoint for DeepSeek R1
+app.post('/test', async (req, res) => {
+  try {
+    const testPayload = {
+      model: DEEPSEEK_R1_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a charismatic fantasy character in a roleplaying game.'
+        },
+        {
+          role: 'user',
+          content: '*I approach you in the tavern* Hello there, stranger. Care for a drink and a tale?'
+        }
+      ],
+      temperature: 0.85,
+      max_tokens: 300
+    };
+    
+    const response = await axios.post(`${NIM_API_BASE}/chat/completions`, testPayload, {
+      headers: {
+        'Authorization': `Bearer ${NIM_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    res.json({
+      success: true,
+      model: DEEPSEEK_R1_MODEL,
+      response: response.data.choices[0].message.content,
+      reasoning: response.data.choices[0].message.reasoning_content,
+      tokens: response.data.usage
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.response?.data
+    });
+  }
+});
+
+// JanitorAI specific endpoint
+app.post('/janitor/v1/chat', async (req, res) => {
+  // Alias for JanitorAI
+  req.body.model = 'deepseek-r1';
+  req.app.post('/v1/chat/completions')(req, res);
 });
 
 app.listen(PORT, () => {
-  console.log(`OpenAI to NVIDIA NIM Proxy running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`Reasoning display: ${SHOW_REASONING ? 'ENABLED' : 'DISABLED'}`);
-  console.log(`Thinking mode: ${ENABLE_THINKING_MODE ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`=== JanitorAI DeepSeek R1 Proxy ===`);
+  console.log(`Port: ${PORT}`);
+  console.log(`Model: ${DEEPSEEK_R1_MODEL}`);
+  console.log(`Reasoning Display: ${SHOW_REASONING ? 'ENABLED (with <think> tags)' : 'DISABLED'}`);
+  console.log(`Thinking Mode: ${ENABLE_THINKING_MODE ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`JanitorAI Endpoint: http://localhost:${PORT}/v1/chat/completions`);
+  console.log(`Test: http://localhost:${PORT}/test`);
+  console.log(`=================================`);
 });
